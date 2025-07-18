@@ -1,1 +1,120 @@
 FocusFlowApp
+# FocusFlow: Smart Task Timer & Discipline Coach
+# Built by: Ajay Chanthavisouk
+
+from flask import Flask, render_template_string, request
+import threading
+import time
+
+app = Flask(__name__)
+
+# Default time blocks – just going with classic 25 min focus, 5 min break for now
+DEFAULT_FOCUS = 25 * 60
+DEFAULT_BREAK = 5 * 60
+
+# This dictionary keeps track of everything: mode, time left, if timer is running, etc.
+session_data = {
+    "mode": "focus",           # starts in focus mode
+    "time_left": DEFAULT_FOCUS,
+    "running": False,
+    "task_name": "",           # user can name the task they're working on
+    "log": []                  # log to track completed sessions
+}
+
+# Quick and simple HTML layout — just to get the UI working
+TEMPLATE = """
+<!doctype html>
+<html>
+    <head>
+        <title>FocusFlow</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+            h1 { color: #2c3e50; }
+            .timer { font-size: 48px; margin: 20px 0; }
+            .mode { font-size: 24px; color: #16a085; }
+        </style>
+    </head>
+    <body>
+        <h1>FocusFlow</h1>
+        <p class="mode">Mode: {{ mode.title() }}</p>
+        <p class="timer">{{ time_left }}</p>
+
+        <form method="POST">
+            <input type="text" name="task" placeholder="Enter task name" value="{{ task_name }}">
+            <br><br>
+            <button name="action" value="start">Start</button>
+            <button name="action" value="pause">Pause</button>
+            <button name="action" value="reset">Reset</button>
+        </form>
+
+        <h3>Session Log</h3>
+        <ul>
+            {% for entry in log %}
+                <li>{{ entry }}</li>
+            {% endfor %}
+        </ul>
+    </body>
+</html>
+"""
+
+# This runs in the background so the timer can count down without freezing the app
+def run_timer():
+    while session_data["running"] and session_data["time_left"] > 0:
+        time.sleep(1)  # wait 1 second
+        session_data["time_left"] -= 1
+
+    # Once timer hits zero, stop and log the session
+    if session_data["time_left"] == 0:
+        session_data["running"] = False
+        mode = session_data["mode"]
+        task = session_data["task_name"] or "Unnamed Task"
+        log_entry = f"Completed {mode} session for task: {task}"
+        session_data["log"].append(log_entry)
+
+        # Switch modes automatically after timer ends
+        if mode == "focus":
+            session_data["mode"] = "break"
+            session_data["time_left"] = DEFAULT_BREAK
+        else:
+            session_data["mode"] = "focus"
+            session_data["time_left"] = DEFAULT_FOCUS
+
+# Main route for homepage
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        action = request.form.get("action")
+        task = request.form.get("task", "").strip()
+
+        # Save task name if provided
+        if task:
+            session_data["task_name"] = task
+
+        # Handle different button presses
+        if action == "start" and not session_data["running"]:
+            session_data["running"] = True
+            threading.Thread(target=run_timer).start()  # start timer thread
+        elif action == "pause":
+            session_data["running"] = False  # pause the timer
+        elif action == "reset":
+            session_data["running"] = False
+            session_data["time_left"] = DEFAULT_FOCUS if session_data["mode"] == "focus" else DEFAULT_BREAK
+            session_data["task_name"] = ""
+
+    # Format time to mm:ss for display
+    minutes = session_data["time_left"] // 60
+    seconds = session_data["time_left"] % 60
+    formatted_time = f"{minutes:02}:{seconds:02}"
+
+    # Render the template with current session info
+    return render_template_string(
+        TEMPLATE,
+        time_left=formatted_time,
+        mode=session_data["mode"],
+        task_name=session_data["task_name"],
+        log=session_data["log"]
+    )
+
+# Start the Flask app
+if __name__ == "__main__":
+    app.run(debug=True)
